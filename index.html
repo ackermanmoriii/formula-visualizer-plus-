@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Contextual Math Core</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #00d2ff; --secondary: #3a7bd5; --bg-dark: #0f172a;
+            --glass: rgba(255, 255, 255, 0.05); --border: rgba(255, 255, 255, 0.1);
+            --success: #00ff88; --error: #ff4d4d;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(circle at top right, #1e293b 0%, #0f172a 100%);
+            color: #e2e8f0; margin: 0; padding: 40px 0; min-height: 100vh;
+            display: flex; justify-content: center;
+        }
+
+        .container {
+            width: 90%; max-width: 950px; background: var(--glass);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border); border-radius: 24px; padding: 40px;
+        }
+
+        h1 { text-align: center; color: var(--primary); margin-bottom: 30px; }
+
+        .input-wrapper { background: rgba(0,0,0,0.2); padding: 20px; border-radius: 16px; margin-bottom: 20px; border: 1px solid var(--border); }
+        input, textarea { width: 100%; background: #1e293b; border: 1px solid var(--border); padding: 15px; border-radius: 12px; color: white; margin-bottom: 10px; box-sizing: border-box;}
+        button { width: 100%; padding: 15px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .btn-primary { background: var(--primary); color: #000; }
+        .btn-check { background: #6366f1; color: white; }
+        .btn-resume { background: var(--success); color: #003300; display: none; }
+        .btn-impossible { background: var(--error); color: white; display: none; }
+        
+        /* دکمه جدید دانلود */
+        .btn-download { 
+            background: transparent; 
+            border: 2px solid var(--primary); 
+            color: var(--primary); 
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn-download:hover { background: rgba(0, 210, 255, 0.1); }
+
+        /* Visualization */
+        .viz-section { display: none; margin-top: 40px; border-top: 1px solid var(--border); padding-top: 30px; }
+        .chart-box { height: 400px; margin-bottom: 15px; }
+        
+        /* EXPLANATION STYLING */
+        .explanation-card {
+            background: rgba(30, 41, 59, 0.6);
+            border-right: 4px solid var(--primary);
+            padding: 30px;
+            border-radius: 16px;
+            line-height: 1.9;
+            font-size: 1.05rem;
+            color: #e2e8f0;
+            text-align: justify;
+            margin-top: 20px;
+        }
+        .explanation-card h3 { color: var(--primary); border-bottom: 1px solid #ffffff1a; padding-bottom: 10px; margin-top: 25px; }
+        .explanation-card strong { color: var(--success); }
+        .explanation-card code { background: #334155; padding: 2px 5px; border-radius: 4px; font-family: monospace; }
+        
+        .math-ltr {
+            direction: ltr;
+            display: inline-block;
+            unicode-bidi: embed;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Gemini Math Core</h1>
+
+    <div class="input-wrapper">
+        <input type="password" id="api-key" placeholder="API Key">
+        <input type="text" id="model-name" value="gemini-2.0-flash-exp" placeholder="Model Name">
+        <button class="btn-primary" onclick="setApi()">Set API</button>
+    </div>
+
+    <div id="main-inputs" class="input-wrapper" style="opacity:0.5; pointer-events:none;">
+        <textarea id="context-input" placeholder="توضیحات مسئله..."></textarea>
+        <input type="text" id="formula-input" placeholder="فرمول (مثال: Var(b) = ...)" dir="ltr">
+        
+        <button class="btn-check" onclick="analyze()">تحلیل</button>
+        <button id="resume-btn" class="btn-resume" onclick="visualize()">رسم نمودار</button>
+        <button id="impossible-btn" class="btn-impossible">غیرممکن</button>
+    </div>
+
+    <div id="viz-section" class="viz-section">
+        <div class="chart-box"><canvas id="myChart"></canvas></div>
+        
+        <button class="btn-download" onclick="downloadChartCode()">
+            <i class="fas fa-file-code"></i> دانلود کد جاوااسکریپت نمودار (JS Chart Code)
+        </button>
+
+        <div id="explanation-text" class="explanation-card"></div>
+    </div>
+</div>
+
+<script>
+    let chartInstance = null;
+    let lastChartData = null; // ذخیره آخرین داده‌ها برای دانلود
+
+    async function setApi() {
+        const apiKey = document.getElementById('api-key').value;
+        const modelName = document.getElementById('model-name').value;
+        const res = await fetch('/set-api', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({api_key: apiKey, model_name: modelName})
+        });
+        const data = await res.json();
+        if(data.status === 'success') {
+            alert('Connected!');
+            document.getElementById('main-inputs').style.opacity = '1';
+            document.getElementById('main-inputs').style.pointerEvents = 'all';
+        } else { alert(data.message); }
+    }
+
+    async function analyze() {
+        const payload = getPayload();
+        document.getElementById('resume-btn').style.display = 'none';
+        
+        const res = await fetch('/analyze', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        if (data.is_graphable) {
+            const btn = document.getElementById('resume-btn');
+            btn.innerHTML = 'مشاهده نمودار و توضیحات';
+            btn.style.display = 'block';
+        } else {
+            alert('غیر قابل رسم: ' + data.reason);
+        }
+    }
+
+    async function visualize() {
+        const payload = getPayload();
+        const btn = document.getElementById('resume-btn');
+        btn.innerHTML = 'در حال محاسبه...';
+        
+        try {
+            const res = await fetch('/visualize', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            
+            if(data.error) throw new Error(data.raw_text || data.error);
+
+            lastChartData = data; // ذخیره برای دانلود
+            renderChart(data);
+            renderRichText(data.explanation);
+            
+            document.getElementById('viz-section').style.display = 'block';
+            document.getElementById('viz-section').scrollIntoView({behavior: 'smooth'});
+
+        } catch(e) {
+            console.error(e);
+            alert('خطا: ' + e);
+        } finally {
+            btn.innerHTML = 'رسم نمودار';
+        }
+    }
+
+    function getPayload() {
+        return {
+            api_key: document.getElementById('api-key').value,
+            model_name: document.getElementById('model-name').value,
+            context: document.getElementById('context-input').value,
+            formula: document.getElementById('formula-input').value
+        };
+    }
+
+    function renderChart(config) {
+        const ctx = document.getElementById('myChart').getContext('2d');
+        if(chartInstance) chartInstance.destroy();
+        
+        chartInstance = new Chart(ctx, {
+            type: config.chart_type,
+            data: { labels: config.labels, datasets: config.datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: config.x_axis_label, color: 'white' }, ticks: { color: '#ccc' } },
+                    y: { title: { display: true, text: config.y_axis_label, color: 'white' }, ticks: { color: '#ccc' } }
+                },
+                plugins: { legend: { labels: { color: 'white' } } }
+            }
+        });
+    }
+
+    function renderRichText(markdownRaw) {
+        const container = document.getElementById('explanation-text');
+        const latexProtected = markdownRaw.replace(/\$(.*?)\$/g, (match, formula) => {
+            return `<span class="math-ltr">$$${formula}$$</span>`;
+        });
+        container.innerHTML = marked.parse(latexProtected);
+        renderMathInElement(container, {
+            delimiters: [
+                {left: "$$", right: "$$", display: true},
+                {left: "$", right: "$", display: false}
+            ],
+            throwOnError: false
+        });
+    }
+
+    // --- تابع جدید برای دانلود کد نمودار ---
+    function downloadChartCode() {
+        if (!lastChartData) return;
+
+        const codeContent = `// Generated by Gemini Math Core
+// This file contains the configuration for Chart.js
+
+const ctx = document.getElementById('myChart').getContext('2d');
+
+const chartConfig = {
+    type: '${lastChartData.chart_type}',
+    data: {
+        labels: ${JSON.stringify(lastChartData.labels)},
+        datasets: ${JSON.stringify(lastChartData.datasets, null, 2)}
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: { 
+                title: { 
+                    display: true, 
+                    text: '${lastChartData.x_axis_label}' 
+                } 
+            },
+            y: { 
+                title: { 
+                    display: true, 
+                    text: '${lastChartData.y_axis_label}' 
+                } 
+            }
+        }
+    }
+};
+
+// Initialize Chart
+new Chart(ctx, chartConfig);
+`;
+
+        const blob = new Blob([codeContent], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'chart_code.js';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+</script>
+
+</body>
+</html>
